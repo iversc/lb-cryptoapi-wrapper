@@ -46,6 +46,49 @@ if CryptAcquireContext(hProv, "", MS.ENH.RSA.AES.PROV$, PROV.RSA.AES, 0) = 0 the
     goto [end]
 end if
 
+hHash = 0
+if ( CryptCreateHash(hProv, CALG.SHA.256, 0, 0, hHash) = 0 ) then
+    print "CryptCreateHash() failed."
+    goto [RCend]
+end if
+
+
+data$ = "testing"
+dataLen = len(data$)
+if ( CryptHashData(hHash, data$, dataLen, 0) = 0 ) then
+    print "CryptHashData() failed."
+    goto [DHend]
+end if
+
+buf$ = ""
+sLen = 0
+
+if ( CryptGetHashSize(hHash, sLen) = 0 ) then
+    print "CryptGetHashParam() size failed."
+    goto [DHend]
+end if
+
+buf$ = space$(sLen)
+
+if ( CryptGetHashValue(hHash, buf$, sLen) = 0 ) then
+    print "CryptGetHashParam() failed."
+    goto [DHend]
+end if
+
+for x = 1 to len(buf$)
+    print asc(mid$(buf$, x, 1))
+    'a$ = dechex$(asc(mid$(buf$, x, 1)))
+    'hex$ = hex$ + right$("00" + a$, 2)
+next x
+
+Print hex$
+
+
+[DHend]
+a = CryptDestroyHash(hHash)
+
+
+[RCend]
 a = CryptReleaseContext(hProv)
 
 [end]
@@ -54,7 +97,7 @@ Call EndCrypto
 
 Sub InitCrypto
     Open "crypt32.dll" for DLL as #crypt32
-    open "advapi32.dll" for DLL as #advapi32
+    open "advapi32.dll" for DLL as #cryptadvapi32
 
     Global CRYPT.STRING.BASE64HEADER
     CRYPT.STRING.BASE64HEADER = 0
@@ -85,11 +128,20 @@ Sub InitCrypto
 
     Global PROV.RSA.AES
     PROV.RSA.AES = 24
+
+    Global HP.HASHSIZE
+    HP.HASHSIZE = 4
+
+    Global HP.HASHVAL
+    HP.HASHVAL = 2
+
+    Global ERROR.MORE.DATA
+    ERROR.MORE.DATA = 234
 End Sub
 
 Sub EndCrypto
     Close #crypt32
-    close #advapi32
+    close #cryptadvapi32
 End Sub
 
 Function CryptAcquireContext(byref hProv, pContainer$, pProvider$, dwProvType, dwFlags)
@@ -98,7 +150,7 @@ Function CryptAcquireContext(byref hProv, pContainer$, pProvider$, dwProvType, d
     a.hProv.struct = hProv
 
     if pContainer$ = "" then
-        CallDLL #advapi32, "CryptAcquireContextA",_
+        CallDLL #cryptadvapi32, "CryptAcquireContextA",_
         a as struct,_
         _NULL as ulong,_
         pProvider$ as ptr,_
@@ -106,7 +158,7 @@ Function CryptAcquireContext(byref hProv, pContainer$, pProvider$, dwProvType, d
         dwFlags as long,_
         CryptAcquireContext as long
     else
-        CallDLL #advapi32, "CryptAcquireContextA",_
+        CallDLL #cryptadvapi32, "CryptAcquireContextA",_
         a as struct,_
         pContainer$ as ptr,_
         pProvider$ as ptr,_
@@ -118,8 +170,86 @@ Function CryptAcquireContext(byref hProv, pContainer$, pProvider$, dwProvType, d
     hProv = a.hProv.struct
 End Function
 
+Function CryptCreateHash(hProv, algId, hKey, dwFlags, byref pHash)
+    struct a, pHash as ulong
+
+    CallDLL #cryptadvapi32, "CryptCreateHash",_
+    hProv as ulong,_
+    algId as long,_
+    hKey as ulong,_
+    dwFlags as long,_
+    a as struct,_
+    CryptCreateHash as long
+
+    pHash = a.pHash.struct
+End Function
+
+Function CryptDestroyHash(hHash)
+    CallDLL #cryptadvapi32, "CryptDestroyHash",_
+    hHash as ulong,_
+    CryptDestroyHash as long
+End Function
+
+Function CryptHashData(hHash, pData$, dataLen, dwFlags)
+    CallDLL #cryptadvapi32, "CryptHashData",_
+    hHash as ulong,_
+    pHash$ as ptr,_
+    dataLen as long,_
+    dwFlags as long,_
+    CryptHashData as long
+End Function
+
+Function CryptGetHashSize(hHash, byref bSize)
+    struct a, bSize as long
+
+    struct b, size as long
+
+    b.size.struct = len(a.struct)
+
+    CallDLL #cryptadvapi32, "CryptGetHashParam",_
+    hHash as ulong,_
+    HP.HASHSIZE as long,_
+    a as struct,_
+    b as struct,_
+    0 as long,_
+    CryptGetHashSize as long
+
+    bSize = a.bSize.struct
+End Function
+
+Function CryptGetHashValue(hHash, byref pData$, byref pDataLen)
+    struct a, pDataLen as long
+    a.pDataLen.struct = pDataLen
+
+    CallDLL #cryptadvapi32, "CryptGetHashParam",_
+    hHash as ulong,_
+    HP.HASHVAL as long,_
+    pData$ as ptr,_
+    a as struct,_
+    0 as long,_
+    CryptGetHashValue as long
+
+    pDataLen = a.pDataLen.struct
+End Function
+
+Function CryptGetHashParam(hHash, dwParam, byref pData$, byref pDataLen, dwFlags)
+    struct a, pDataLen as long
+
+    a.pDataLen.struct = pDataLen
+
+    CallDLL #cryptadvapi32, "CryptGetHashParam",_
+    hHash as ulong,_
+    dwParam as long,_
+    pData$ as ptr,_
+    a as struct,_
+    dwFlags as long,_
+    CryptGetHashParam as long
+
+    pDataLen = a.pDataLen.struct
+End Function
+
 Function CryptReleaseContext(hProv)
-    CallDLL #advapi32, "CryptReleaseContext",_
+    CallDLL #cryptadvapi32, "CryptReleaseContext",_
     hProv as ulong,_
     0 as long,_
     CryptReleaseContext as long
