@@ -1,92 +1,83 @@
 Call InitCrypto
 
-str$ = "testing"
-lenStr = len(str$)
-
-buf$ = ""
-bufLen = 0
-if CryptBinaryToString(str$, lenStr, CRYPT.STRING.BASE64, buf$, bufLen) = 0 then
-    Print "CryptBinaryToString() failed."
-    goto [end]
-end if
-
-buf$ = space$(bufLen)
-
-if CryptBinaryToString(str$, lenStr, CRYPT.STRING.BASE64, buf$, bufLen) = 0 then
-    Print "CryptBinaryToString() failed."
-    goto [end]
-end if
-
-Print buf$
-
-
-decBuf$ = ""
-decBufLen = 0
-
-if CryptStringToBinary(buf$, bufLen, CRYPT.STRING.BASE64, decBuf$, decBufLen, 0, 0) = 0 then
-    Print "CryptStringToBinary() failed."
-    goto [end]
-end if
-
-Print "Required return buffer - ";decBufLen
-
-decBuf$ = space$(decBufLen)
-
-if CryptStringToBinary(buf$, bufLen, CRYPT.STRING.BASE64, decBuf$, decBufLen, 0, 0) = 0 then
-    Print "CryptStringToBinary() failed."
-    goto [end]
-end if
-
-print decBuf$
-
-
 hProv = 0
 if CryptAcquireContext(hProv, "", MS.ENH.RSA.AES.PROV$, PROV.RSA.AES, 0) = 0 then
     print "CryptAcquireContext() failed."
     goto [end]
 end if
 
+keyPass$ = "testing"
+
 hHash = 0
-if ( CryptCreateHash(hProv, CALG.SHA.256, 0, 0, hHash) = 0 ) then
-    print "CryptCreateHash() failed."
+if ( CryptCreateHash(hProv, CALG.SHA.256, 0, 0, hHash) = 0) then
+    Print "Unable to create hash object."
     goto [RCend]
 end if
 
+keyPassLen = len(keyPass$)
 
-data$ = "testing"
-dataLen = len(data$)
-if ( CryptHashData(hHash, data$, dataLen, 0) = 0 ) then
-    print "CryptHashData() failed."
+a = CryptHashData(hHash, keyPass$, keyPassLen, 0)
+
+
+Print "Attempting to derive key..."
+
+hKey = 0
+if ( CryptDeriveKey(hProv, CALG.AES.256, hHash, CRYPT.EXPORTABLE, hKey) = 0 ) then
+    Print "Unable to derive key."
     goto [DHend]
 end if
 
-buf$ = ""
-sLen = 0
+Print "Key derived!"
 
-if ( CryptGetHashSize(hHash, sLen) = 0 ) then
-    print "CryptGetHashParam() size failed."
-    goto [DHend]
+
+Print "Attempting to export plaintext key..."
+blobLen = 0
+if ( CryptExportKey(hKey, 0, PLAINTEXTKEYBLOB, 0, "", blobLen) = 0 ) then
+    Print "Export size failed."
+    goto [DKend]
 end if
 
-buf$ = space$(sLen)
+print blobLen
 
-if ( CryptGetHashValue(hHash, buf$, sLen) = 0 ) then
-    print "CryptGetHashParam() failed."
-    goto [DHend]
+blob$ = space$(blobLen)
+if ( CryptExportKey(hKey, 0, PLAINTEXTKEYBLOB, 0, blob$, blobLen) = 0 ) then
+    print GetLastError()
+    print blobLen
+    Print "Export failed."
+    goto [DKend]
 end if
 
-for x = 1 to len(buf$)
-    'print asc(mid$(buf$, x, 1))
-    a$ = dechex$(asc(mid$(buf$, x, 1)))
-    hex$ = hex$ + right$("00" + a$, 2)
-next x
+key$ = right$(blob$, len(blob$) - 12)
+For x = 1 to len(key$)
+    print right$("00" + dechex$(asc(mid$(key$, x, 1))), 2);
+Next x
+print
+toEnc$ = "test"
+encBuf$ = toEnc$
+curLen = len(encBuf$)
+mLen = int(curLen / AES.BLOCK.SIZE + 1) * AES.BLOCK.SIZE
+encBuf$ = encBuf$ + space$(mLen - curLen)
 
-Print hex$
+if ( CryptEncrypt(hKey, 0, 1, 0, encBuf$, curLen, mLen) = 0) then
+    print "Encryption failed."
+    goto [DKend]
+end if
 
+res$ = left$(encBuf$, curLen)
+print res$
+
+if ( CryptDecrypt(hKey, 0, 1, 0, res$, curLen) = 0) then
+    print "Decryption failed."
+    goto [DKend]
+end if
+
+print left$(res$, curLen)
+
+[DKend]
+a = CryptDestroyKey(hKey)
 
 [DHend]
 a = CryptDestroyHash(hHash)
-
 
 [RCend]
 a = CryptReleaseContext(hProv)
@@ -137,12 +128,35 @@ Sub InitCrypto
 
     Global ERROR.MORE.DATA
     ERROR.MORE.DATA = 234
+
+    Global CRYPT.EXPORTABLE
+    CRYPT.EXPORTABLE = 1
+
+    Global SIMPLEBLOB
+    SIMPLEBLOB = 1
+
+    Global PUBLICKEYBLOB
+    PUBLICKEYBLOB = 6
+
+    Global PRIVATEKEYBLOB
+    PRIVATEKEYBLOB = 7
+
+    Global PLAINTEXTKEYBLOB
+    PLAINTEXTKEYBLOB = 8
+
+    Global AES.BLOCK.SIZE
+    AES.BLOCK.SIZE = 16
 End Sub
 
 Sub EndCrypto
     Close #crypt32
     close #cryptadvapi32
 End Sub
+
+Function GetLastError()
+    CallDLL #kernel32, "GetLastError",_
+    GetLastError as long
+End Function
 
 Function CryptAcquireContext(byref hProv, pContainer$, pProvider$, dwProvType, dwFlags)
     struct a, hProv as ulong
@@ -168,6 +182,99 @@ Function CryptAcquireContext(byref hProv, pContainer$, pProvider$, dwProvType, d
     end if
 
     hProv = a.hProv.struct
+End Function
+
+Function CryptEncrypt(hKey, hHash, Final, dwFlags, byref pData$, byref pDataLen, dwBufLen)
+    struct a, pDataLen as ulong
+    a.pDataLen.struct = pDataLen
+
+    CallDLL #cryptadvapi32, "CryptEncrypt",_
+    hKey as ulong,_
+    hHash as ulong,_
+    Final as long,_
+    dwFlags as long,_
+    pData$ as ptr,_
+    a as struct,_
+    dwBufLen as long,_
+    CryptEncrypt as long
+
+    pDataLen = a.pDataLen.struct
+End Function
+
+Function CryptDecrypt(hKey, hHash, Final, dwFlags, byref pData$, byref pDataLen)
+    struct a, pDataLen as ulong
+    a.pDataLen.struct = pDataLen
+
+    CallDLL #cryptadvapi32, "CryptDecrypt",_
+    hKey as ulong,_
+    hHash as ulong,_
+    Final as long,_
+    dwFlags as long,_
+    pData$ as ptr,_
+    a as struct,_
+    CryptDecrypt as long
+
+    pDataLen = a.pDataLen.struct
+End Function
+
+Function CryptGenKey(hProv, algId, dwFlags, byref hKey)
+    struct a, hKey as ulong
+
+    CallDLL #cryptadvapi32, "CryptGenKey",_
+    hProv as ulong,_
+    algId as long,_
+    dwFlags as long,_
+    a as struct,_
+    CryptGenKey as long
+
+    hKey = a.hKey.struct
+End Function
+
+Function CryptDeriveKey(hProv, algId, hBaseData, dwFlags, byref pKey)
+    struct a, pKey as ulong
+
+    CallDLL #cryptadvapi32, "CryptDeriveKey",_
+    hProv as ulong,_
+    algId as long,_
+    hBaseData as ulong,_
+    dwFlags as long,_
+    a as struct,_
+    CryptDeriveKey as long
+
+    pKey = a.pKey.struct
+End Function
+
+Function CryptDestroyKey(hKey)
+    CallDLL #cryptadvapi32, "CryptDestroyKey",_
+    hKey as ulong,_
+    CryptDestroyKey as long
+End Function
+
+Function CryptExportKey(hKey, hExpKey, dwBlobType, dwFlags, byref pbData$, byref pdwDataLen)
+    struct a, pdwDataLen as long
+    a.pdwDataLen.struct = pdwDataLen
+
+    if pbData$ = "" then
+        CallDLL #cryptadvapi32, "CryptExportKey",_
+        hKey as ulong,_
+        hExpKey as ulong,_
+        dwBlobType as long,_
+        dwFlags as long,_
+        _NULL as ulong,_
+        a as struct,_
+        CryptExportKey as long
+    else
+        CallDLL #cryptadvapi32, "CryptExportKey",_
+        hKey as ulong,_
+        hExpKey as ulong,_
+        dwBlobType as long,_
+        dwFlags as long,_
+        pbData$ as ptr,_
+        a as struct,_
+        CryptExportKey as long
+    end if
+
+    pdwDataLen = a.pdwDataLen.struct
 End Function
 
 Function CryptCreateHash(hProv, algId, hKey, dwFlags, byref pHash)
