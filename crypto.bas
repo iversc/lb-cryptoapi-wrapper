@@ -76,9 +76,9 @@ if ( CryptGetHashValue(hHash, buf$, sLen) = 0 ) then
 end if
 
 for x = 1 to len(buf$)
-    print asc(mid$(buf$, x, 1))
-    'a$ = dechex$(asc(mid$(buf$, x, 1)))
-    'hex$ = hex$ + right$("00" + a$, 2)
+    'print asc(mid$(buf$, x, 1))
+    a$ = dechex$(asc(mid$(buf$, x, 1)))
+    hex$ = hex$ + right$("00" + a$, 2)
 next x
 
 Print hex$
@@ -193,7 +193,7 @@ End Function
 Function CryptHashData(hHash, pData$, dataLen, dwFlags)
     CallDLL #cryptadvapi32, "CryptHashData",_
     hHash as ulong,_
-    pHash$ as ptr,_
+    pData$ as ptr,_
     dataLen as long,_
     dwFlags as long,_
     CryptHashData as long
