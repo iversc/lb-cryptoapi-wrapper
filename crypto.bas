@@ -20,35 +20,66 @@ if ( CryptImportKey(hProv, blob$, lenBlob, _NULL, 0, hKey) = 0 ) then
 end if
 
 
-toEnc$ = "dolldiggabuzzbuzzziggedyzaggodmodgrotesqueburlesquedragdolldiggabuzzbuzzziggedyzaggodmodgrotesqueburlesquedrag"
-curLen = len(encBuf$)
-print curLen
+toHash$ = "askldfjaklsjufioasdfjlkj"
+toHashLen = len(toHash$)
 
-if ( CryptEncrypt(hKey, 0, 1, 0, "", curLen, 0) = 0) then
-    print dechex$(GetLastError())
-    Print "Encryption size failed."
+hHash = 0
+if ( CryptCreateHash(hProv, CALG.SHA.256, 0, 0, hHash) = 0 ) then
+    Print "CryptCreateHash() failed - ";GetLastError()
     goto [DKend]
 end if
 
-encBuf$ = encBuf$ + space$( curLen - len(toEnc$))
-mLen = curLen
-curLen = len(toEnc$)
 
-if ( CryptEncrypt(hKey, 0, 1, 0, encBuf$, curLen, mLen) = 0) then
-    print dechex$(GetLastError())
-    print "Encryption failed."
+if ( CryptHashData(hHash, toHash$, toHashLen, 0) = 0) then
+    Print "CryptHashData() failed - ";GetLastError()
+    goto [DHend]
+end if
+
+
+Print "Getting sig length..."
+
+sigLen = 0
+if ( CryptSignHash(hHash, AT.KEYEXCHANGE, 0, "", sigLen) = 0) then
+    Print "Unable to get signature length - ";GetLastError()
+    goto [DHend]
+end if
+
+
+sigBuf$ = space$(sigLen)
+if ( CryptSignHash(hHash, AT.KEYEXCHANGE, 0, sigBuf$, sigLen) = 0) then
+    Print "Unable to sign hash - ";GetLastError()
+    goto [DHend]
+end if
+
+print "Signed successfully.  Attempting to verify signature."
+
+a = CryptDestroyHash(hHash)
+
+
+toHash$ = "askldfjaklsjufioasdfjlkj"
+toHashLen = len(toHash$)
+
+hHash = 0
+if ( CryptCreateHash(hProv, CALG.SHA.256, 0, 0, hHash) = 0 ) then
+    Print "CryptCreateHash() failed - ";GetLastError()
     goto [DKend]
 end if
 
-res$ = left$(encBuf$, curLen)
-print res$
 
-if ( CryptDecrypt(hKey, 0, 1, 0, res$, curLen) = 0) then
-    print "Decryption failed."
-    goto [DKend]
+if ( CryptHashData(hHash, toHash$, toHashLen, 0) = 0) then
+    Print "CryptHashData() failed - ";GetLastError()
+    goto [DHend]
 end if
 
-print left$(res$, curLen)
+if ( CryptVerifySignature(hHash, sigBuf$, sigLen, hKey, 0) ) then
+    Print "Verified signature!"
+else
+    Print "Unable to verify signature - ";GetLastError()
+end if
+
+
+[DHend]
+a = CryptDestroyHash(hHash)
 
 [DKend]
 a = CryptDestroyKey(hKey)
@@ -200,6 +231,44 @@ Function CryptEncrypt(hKey, hHash, Final, dwFlags, byref pData$, byref pDataLen,
     end if
 
     pDataLen = a.pDataLen.struct
+End Function
+
+Function CryptSignHash(hHash, dwKeySpec, dwFlags, byref pbSignature$, byref pdwSigLen)
+    struct a, pdwSigLen as long
+    a.pdwSigLen.struct = pdwSigLen
+
+    if pbSignature$ = "" then
+        CallDLL #cryptadvapi32, "CryptSignHashA",_
+        hHash as ulong,_
+        dwKeySpec as long,_
+        _NULL as long,_
+        dwFlags as long,_
+        _NULL as long,_
+        a as struct,_
+        CryptSignHash as long
+    else
+        CallDLL #cryptadvapi32, "CryptSignHashA",_
+        hHash as ulong,_
+        dwKeySpec as long,_
+        _NULL as long,_
+        dwFlags as long,_
+        pbSignature$ as ptr,_
+        a as struct,_
+        CryptSignHash as long
+    end if
+
+    pdwSigLen = a.pdwSigLen.struct
+End Function
+
+Function CryptVerifySignature(hHash, pbSignature$, dwSigLen, hPubKey, dwFlags)
+    CallDLL #cryptadvapi32, "CryptVerifySignatureA",_
+    hHash as ulong,_
+    pbSignature$ as ptr,_
+    dwSigLen as long,_
+    hPubKey as ulong,_
+    _NULL as long,_
+    dwFlags as long,_
+    CryptVerifySignature as long
 End Function
 
 Function CryptDecrypt(hKey, hHash, Final, dwFlags, byref pData$, byref pDataLen)
@@ -371,15 +440,34 @@ Function CryptGetHashParam(hHash, dwParam, byref pData$, byref pDataLen, dwFlags
 
     a.pDataLen.struct = pDataLen
 
-    CallDLL #cryptadvapi32, "CryptGetHashParam",_
-    hHash as ulong,_
-    dwParam as long,_
-    pData$ as ptr,_
-    a as struct,_
-    dwFlags as long,_
-    CryptGetHashParam as long
+    if pData$ = "" then
+        CallDLL #cryptadvapi32, "CryptGetHashParam",_
+        hHash as ulong,_
+        dwParam as long,_
+        _NULL as long,_
+        a as struct,_
+        dwFlags as long,_
+        CryptGetHashParam as long
+    else
+        CallDLL #cryptadvapi32, "CryptGetHashParam",_
+        hHash as ulong,_
+        dwParam as long,_
+        pData$ as ptr,_
+        a as struct,_
+        dwFlags as long,_
+        CryptGetHashParam as long
+    end if
 
     pDataLen = a.pDataLen.struct
+End Function
+
+Function CryptSetHashParam(hHash, dwParam, pbData$, dwFlags)
+    CallDLL #cryptadvapi32, "CryptSetHashParam",_
+    hHash as ulong,_
+    dwParam as long,_
+    pbData$ as ptr,_
+    dwFlags as long,_
+    CryptSetHashParam as long
 End Function
 
 Function CryptReleaseContext(hProv)
