@@ -1,85 +1,89 @@
+'Must begin with InitCrypto, and end with EndCrypto.
 Call InitCrypto
 
-hProv = 0
-if CryptAcquireContext(hProv, "", MS.ENH.RSA.AES.PROV$, PROV.RSA.AES, CRYPT.VERIFYCONTEXT) = 0 then
-    print "CryptAcquireContext() failed."
+'Set up a cryptographic context to use for this session.
+'Only context I've included is the MS RSA and AES provider, so I wrote a function to use that as the default.
+hProv = GetRSAAESContext()
+if hProv = 0 then
+    print "CryptAcquireContext() failed - ";GetLastError()
     goto [end]
 end if
 
-open "testkey.txt" for binary as #testkey
-blob$ = input$(#testkey, lof(#testkey))
-close #testkey
+'Derive an AES-256 encryption key from a password.
+Input "Enter encryption password. >";password$
 
-print blob$
 
-lenBlob = len(blob$)
-hKey = 0
-if ( CryptImportKey(hProv, blob$, lenBlob, _NULL, 0, hKey) = 0 ) then
-    Print "CryptImportKey() failed."
+'The derivation is done by hashing the input, as generating a key based on the hash.
+'The following helper function takes care of both.
+'
+'All keys derived are marked as exportable, so the raw key can be saved later with
+'CryptExportKey() if wished.
+hKey = DeriveAES256Key(hProv, password$)
+
+if hKey = 0 then
+    print "Key derivation failed. - ";GetLastError()
     goto [RCend]
 end if
 
+print
 
-toHash$ = "askldfjaklsjufioasdfjlkj"
-toHashLen = len(toHash$)
+someData$ = "shortdata"
+Print "Encrypting short message - ";someData$
+encSomeData$ = AES256Encrypt$(hKey, someData$)
+Print "Encrypted message - ";encSomeData$
 
-hHash = 0
-if ( CryptCreateHash(hProv, CALG.SHA.256, 0, 0, hHash) = 0 ) then
-    Print "CryptCreateHash() failed - ";GetLastError()
+if encSomeData$ = "" then
+    Print "Short encryption failed."
     goto [DKend]
 end if
 
 
-if ( CryptHashData(hHash, toHash$, toHashLen, 0) = 0) then
-    Print "CryptHashData() failed - ";GetLastError()
-    goto [DHend]
-end if
+Print
+longData$ = "The quick brown fox jumps over the lazy dog."
+Print "Encrypting long message - ";longData$
+encLongData$ = AES256Encrypt$(hKey, longData$)
+print "Encrypted message - ";encLongData$
 
-
-Print "Getting sig length..."
-
-sigLen = 0
-if ( CryptSignHash(hHash, AT.KEYEXCHANGE, 0, "", sigLen) = 0) then
-    Print "Unable to get signature length - ";GetLastError()
-    goto [DHend]
-end if
-
-
-sigBuf$ = space$(sigLen)
-if ( CryptSignHash(hHash, AT.KEYEXCHANGE, 0, sigBuf$, sigLen) = 0) then
-    Print "Unable to sign hash - ";GetLastError()
-    goto [DHend]
-end if
-
-print "Signed successfully.  Attempting to verify signature."
-
-a = CryptDestroyHash(hHash)
-
-
-toHash$ = "askldfjaklsjufioasdfjlkj"
-toHashLen = len(toHash$)
-
-hHash = 0
-if ( CryptCreateHash(hProv, CALG.SHA.256, 0, 0, hHash) = 0 ) then
-    Print "CryptCreateHash() failed - ";GetLastError()
+if encLongData$ = "" then
+    Print "Long encryption failed."
     goto [DKend]
 end if
 
+'Destroy key, and re-derive, to prove separate keygen and decryption
+a = CryptDestroyKey(hKey)
 
-if ( CryptHashData(hHash, toHash$, toHashLen, 0) = 0) then
-    Print "CryptHashData() failed - ";GetLastError()
-    goto [DHend]
+
+Print
+
+Input "Enter decryption password. >";password$
+
+hKey = DeriveAES256Key(hProv, password$)
+
+if hKey = 0 then
+    print "Key derivation failed. - ";GetLastError()
+    goto [RCend]
 end if
 
-if ( CryptVerifySignature(hHash, sigBuf$, sigLen, hKey, 0) ) then
-    Print "Verified signature!"
-else
-    Print "Unable to verify signature - ";GetLastError()
+Print "Decrypting short message..."
+decSomeData$ = AES256Decrypt$(hKey, encSomeData$)
+Print "Decrypted message - ";decSomeData$
+
+if decSomeData$ = "" then
+    Print "Short decryption failed."
+    goto [DKend]
 end if
 
+Print
 
-[DHend]
-a = CryptDestroyHash(hHash)
+Print "Decrypting long message..."
+decLongData$ = AES256Decrypt$(hKey, encLongData$)
+Print "Decrypted message - ";decLongData$
+
+if decLongData$ = "" then
+    Print "Long decryption failed."
+    goto [DKend]
+end if
+
 
 [DKend]
 a = CryptDestroyKey(hKey)
@@ -176,6 +180,116 @@ End Sub
 Function GetLastError()
     CallDLL #kernel32, "GetLastError",_
     GetLastError as long
+End Function
+
+Function GetRSAAESContext()
+    hProv = 0
+    a = CryptAcquireContext(hProv, "", MS.ENH.RSA.AES.PROV$, PROV.RSA.AES, CRYPT.VERIFYCONTEXT)
+    If a = 0 then
+        GetRSAAESContext = 0
+    Else
+        GetRSAAESContext = hProv
+    End If
+End Function
+
+Function DeriveAES256Key(hProv, pData$)
+    DeriveAES256Key = 0
+    hHash = 0
+
+    noKey = 0    'SHA256 is not a keyed algorithm, so we pass 0
+    noFlags = 0  'We are not using any flags for this hash
+    if ( CryptCreateHash(hProv, CALG.SHA.256, noKey, noFlags, hHash) = 0) then
+        'Hash creation failed.
+        goto [exit]
+    end if
+
+    lenData = len(pData$)
+
+    if ( CryptHashData(hHash, pData$, lenData, noFlags) = 0 ) then
+        'Hash data failed.
+        goto [DHexit]
+    end if
+
+    'Now that we have the hash, we can derive the key from it.
+    'We do not actually need to obtain the hash ourselves, just
+    'pass the handle(hHash) to the Derive function.
+    hKey = 0
+    if ( CryptDeriveKey(hProv, CALG.AES.256, hHash, CRYPT.EXPORTABLE, hKey) = 0 ) then
+        'CryptDeriveKey() failed.
+        goto [DHexit]
+    end if
+
+    DeriveAES256Key = hKey
+
+    [DHexit]
+    'Clear memory for hash when we're done with it
+    a = CryptDestroyHash(hHash)
+
+    [exit]
+End Function
+
+Function AES256Encrypt$(hKey, data$)
+    AES256Encrypt$ = ""
+    encBuf$ = ""
+
+    For x = 1 to len(data$) step AES.BLOCK.SIZE
+        chunk$ = mid$(data$, x, AES.BLOCK.SIZE)
+        cLen = len(chunk$)  'Amount of data in bytes being encrypted in this chunk
+        bufLen = int(len(chunk$) / AES.BLOCK.SIZE + 1) * AES.BLOCK.SIZE
+        plainBuf$ = chunk$ + space$(bufLen - cLen)  'Size of the whole buffer we're passing in
+
+        noHash = 0  'We are not using the hashing feature of CryptEncrypt for this
+
+        'Is this the final block we're encrypting?
+        if x + AES.BLOCK.SIZE > len(data$) then
+            Final = 1
+        else
+            Final = 0
+        end if
+
+        noFlags = 0
+        if ( CryptEncrypt(hKey, noHash, Final, noFlags, plainBuf$, cLen, bufLen) = 0 ) then
+            'CryptEncrypt failed
+            goto [exit]
+        end if
+
+        'cLen gets updated by CryptEncrypt() to now hold the number of bytes in the encrypted buffer.
+        'Add that to our running total of encrypted data.
+        encBuf$ = encBuf$ + left$(plainBuf$, cLen)
+    Next x
+
+    AES256Encrypt$ = encBuf$
+    [exit]
+End Function
+
+Function AES256Decrypt$(hKey, encData$)
+    AES256Decrypt$ = ""
+    decBuf$ = ""
+
+    For x = 1 to len(encData$) step AES.BLOCK.SIZE
+        chunk$ = mid$(encData$, x, AES.BLOCK.SIZE)
+        cLen = len(chunk$) 'Amount of bytes being decrypted
+
+        noHash = 0  'Not using hash abilty of CryptDecrypt
+
+        'Final chunk?
+        if x + AES.BLOCK.SIZE > len(encData$) then
+            Final = 1
+        else
+            Final = 0
+        end if
+
+        noFlags = 0
+        if ( CryptDecrypt(hKey, noHash, Final, noFlags, chunk$, cLen) = 0) then
+            'Decryption failed
+            goto [exit]
+        end if
+
+        decBuf$ = decBuf$ + left$(chunk$, cLen)
+    Next x
+
+    AES256Decrypt$ = decBuf$
+    [exit]
 End Function
 
 Function CryptAcquireContext(byref hProv, pContainer$, pProvider$, dwProvType, dwFlags)
