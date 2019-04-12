@@ -227,9 +227,12 @@ Function GetSHA256Hash$(pData$)
         goto [DHexit]
     end if
 
+    hashVal = 0
     for x = 1 to hashBufLen
-        GetSHA256Hash$ = GetSHA256Hash$ + right$("00" + dechex$(asc(mid$(hashBuf$, x, 1))), 2)
-    next
+        hashVal = (hashVal * 256) + asc(mid$(hashBuf$, x, 1))
+    next x
+
+    GetSHA256Hash$ = dechex$(hashVal)
 
     [DHexit]
     'Clear memory for hash when we're done with it
