@@ -192,6 +192,54 @@ Function GetRSAAESContext()
     End If
 End Function
 
+Function GetSHA256Hash$(pData$)
+    Call InitCrypto
+
+    hProv = GetRSAAESContext()
+    if hProv = 0 then goto [exit]
+
+    DeriveAES256Key = 0
+    hHash = 0
+
+    noKey = 0    'SHA256 is not a keyed algorithm, so we pass 0
+    noFlags = 0  'We are not using any flags for this hash
+    if ( CryptCreateHash(hProv, CALG.SHA.256, noKey, noFlags, hHash) = 0) then
+        'Hash creation failed.
+        goto [exit]
+    end if
+
+    lenData = len(pData$)
+
+    if ( CryptHashData(hHash, pData$, lenData, noFlags) = 0 ) then
+        'Hash data failed.
+        goto [DHexit]
+    end if
+
+    'Now we need to retrieve the hash.
+    hashSize = 0
+    if ( CryptGetHashSize(hHash, hashSize) = 0 ) then
+        goto [DHexit]
+    end if
+
+    hashBufLen = hashSize
+    hashBuf$ = space$(hashBufLen)
+    if ( CryptGetHashValue(hHash, hashBuf$, hashBufLen) = 0 ) then
+        goto [DHexit]
+    end if
+
+    for x = 1 to hashBufLen
+        GetSHA256Hash$ = GetSHA256Hash$ + right$("00" + dechex$(asc(mid$(hashBuf$, x, 1))), 2)
+    next
+
+    [DHexit]
+    'Clear memory for hash when we're done with it
+    a = CryptDestroyHash(hHash)
+    a = CryptReleaseContext(hProv)
+
+    [exit]
+    Call EndCrypto
+End Function
+
 Function DeriveAES256Key(hProv, pData$)
     DeriveAES256Key = 0
     hHash = 0
