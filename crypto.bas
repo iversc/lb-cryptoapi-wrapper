@@ -232,16 +232,20 @@ Function AES256Encrypt$(hKey, data$)
     AES256Encrypt$ = ""
     encBuf$ = ""
 
-    For x = 1 to len(data$) step AES.BLOCK.SIZE
-        chunk$ = mid$(data$, x, AES.BLOCK.SIZE)
+    'Try to do around 1000 bytes per call
+    blockLen = 1000 - (1000 mod AES.BLOCK.SIZE)
+    bufferLen = blockLen + AES.BLOCK.SIZE
+
+    For x = 1 to len(data$) step blockLen
+        chunk$ = mid$(data$, x, blockLen)
         cLen = len(chunk$)  'Amount of data in bytes being encrypted in this chunk
-        bufLen = int(len(chunk$) / AES.BLOCK.SIZE + 1) * AES.BLOCK.SIZE
+        bufLen = bufferLen
         plainBuf$ = chunk$ + space$(bufLen - cLen)  'Size of the whole buffer we're passing in
 
         noHash = 0  'We are not using the hashing feature of CryptEncrypt for this
 
         'Is this the final block we're encrypting?
-        if x + AES.BLOCK.SIZE > len(data$) then
+        if x + blockLen > len(data$) then
             Final = 1
         else
             Final = 0
@@ -266,14 +270,16 @@ Function AES256Decrypt$(hKey, encData$)
     AES256Decrypt$ = ""
     decBuf$ = ""
 
-    For x = 1 to len(encData$) step AES.BLOCK.SIZE
-        chunk$ = mid$(encData$, x, AES.BLOCK.SIZE)
+    blockLen = 1000 - (1000 mod AES.BLOCK.SIZE)
+
+    For x = 1 to len(encData$) step blockLen
+        chunk$ = mid$(encData$, x, blockLen)
         cLen = len(chunk$) 'Amount of bytes being decrypted
 
         noHash = 0  'Not using hash abilty of CryptDecrypt
 
         'Final chunk?
-        if x + AES.BLOCK.SIZE > len(encData$) then
+        if x + blockLen > len(encData$) then
             Final = 1
         else
             Final = 0
